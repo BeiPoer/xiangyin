@@ -16,6 +16,19 @@ try {
   await page.getByLabel('密码', { exact: true }).fill(credentials.password);
   await page.getByRole('button', { name: '进入我的词库' }).click();
   await expect(page.getByRole('heading', { name: '我的词库。' })).toBeVisible();
+  const mimeRoundTrip = await page.evaluate(async () => {
+    const { saveWord, removeWord } = await import('/db.js');
+    const results = [];
+    for (const type of ['audio/mp4; codecs="mp4a.40.2"', 'video/mp4; codecs="avc1.42e01e, mp4a.40.2"']) {
+      const blob = new Blob(['mime-round-trip'], { type });
+      const word = await saveWord({ text: '格式测试', note: '', favorite: false }, blob);
+      const response = await fetch(`/api/words/${word.id}/audio`);
+      results.push({ status: response.status, data: await response.text() });
+      await removeWord(word.id, word.version);
+    }
+    return results;
+  });
+  expect(mimeRoundTrip).toEqual([{ status: 200, data: 'mime-round-trip' }, { status: 200, data: 'mime-round-trip' }]);
   await page.screenshot({ path: 'test-results/mobile-empty.png', fullPage: true });
   await page.getByRole('button', { name: '添加字词', exact: true }).click();
   await page.getByLabel('字 / 词').fill('叔叔');

@@ -1,7 +1,35 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rm } from 'node:fs/promises';
+import { MIMEType } from 'node:util';
 import { startServer, client, credentials } from './helpers.mjs';
+
+test('录音 MIME 支持空格、引号和编码列表，失败时保留旧录音', async () => {
+  const server = await startServer();
+  try {
+    const api = await client(server);
+    await api('/login', 'POST', credentials);
+    const bytes = Buffer.from('recording-payload');
+    let word = { text: '叔叔', note: '', favorite: false };
+    for (const mime of ['audio/mp4', 'audio/mp4; codecs=mp4a.40.2', 'audio/mp4;codecs="mp4a.40.2"',
+      'audio/mp4; codecs="mp4a.40.2"', 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"',
+      'audio/webm;codecs=opus', 'audio/ogg; codecs="opus"', 'audio/wav']) {
+      const saved = await api('/words', 'POST', { ...word, recording: { data: bytes.toString('base64'), mime } });
+      assert.equal(saved.status, 200, mime);
+      word = saved.value;
+      const audio = await api(`/words/${word.id}/audio`);
+      assert.deepEqual(audio.value, bytes);
+      assert.equal(audio.headers.get('content-type'), new MIMEType(mime).toString());
+    }
+    for (const mime of ['text/html', 'application/octet-stream', 'not-a-mime', 'audio/mp4\r\nX-Test: injected', '', null]) {
+      const saved = await api('/words', 'POST', { ...word, recording: { data: Buffer.from('replacement').toString('base64'), mime } });
+      assert.equal(saved.status, 400);
+      assert.equal(saved.value.error, '不支持这种录音格式');
+      assert.deepEqual((await api(`/words/${word.id}/audio`)).value, bytes);
+      assert.equal((await api('/words')).value[0].version, word.version);
+    }
+  } finally { await server.stop(); }
+});
 
 test('简单密码登录、权限保护、音频、同步、冲突、复习幂等和重启持久化', async () => {
   let server = await startServer();

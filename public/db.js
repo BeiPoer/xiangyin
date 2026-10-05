@@ -25,7 +25,7 @@ export async function saveWord(word, audio) {
   if (audio) {
     const data = await new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onload = () => resolve(reader.result.slice(reader.result.lastIndexOf(',') + 1));
       reader.onerror = () => reject(new Error('无法读取录音，请重试'));
       reader.readAsDataURL(audio);
     });

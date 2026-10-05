@@ -2,7 +2,7 @@ import http from 'node:http';
 import https from 'node:https';
 import { readFile, mkdir } from 'node:fs/promises';
 import { randomBytes, randomUUID, scrypt, timingSafeEqual, createHash } from 'node:crypto';
-import { promisify } from 'node:util';
+import { MIMEType, promisify } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { grade, makeRound } from './public/domain.js';
@@ -126,8 +126,11 @@ async function api(req, res, path) {
     if (body.recording) {
       const rec = body.recording;
       check(typeof rec.data === 'string' && /^[A-Za-z0-9+/]+={0,2}$/.test(rec.data), '录音数据无效');
-      check(typeof rec.mime === 'string' && /^(audio\/(webm|mp4|ogg|wav)|video\/mp4)(;codecs=[\w., -]+)?$/i.test(rec.mime), '不支持这种录音格式');
-      audio = Buffer.from(rec.data, 'base64'); mime = rec.mime;
+      check(typeof rec.mime === 'string' && rec.mime.length <= 256 && !/[\x00-\x1f\x7f]/.test(rec.mime), '不支持这种录音格式');
+      let mediaType;
+      try { mediaType = new MIMEType(rec.mime); } catch { check(false, '不支持这种录音格式'); }
+      check(['audio/webm', 'audio/mp4', 'audio/ogg', 'audio/wav', 'video/mp4'].includes(mediaType.essence), '不支持这种录音格式');
+      audio = Buffer.from(rec.data, 'base64'); mime = mediaType.toString();
       check(audio.length > 0 && audio.length <= 8 * 1024 * 1024, '录音不能超过 8 MB');
     }
     const word = { ...(old || { id: randomUUID(), correct: 0, wrong: 0, streak: 0, mistake: false, createdAt: Date.now() }),
