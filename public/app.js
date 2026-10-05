@@ -23,6 +23,35 @@ let audio = null, playbackRun = 0, playbackTimer, toastTimer;
 // ponytail: retain at most 8 native players in this tab; increase only if repeat-listening needs it.
 const audioCache = new Map();
 const editor = $('#editor');
+const main = $('#main');
+const pageViews = new Map();
+let navigationRun = 0, refreshRun = 0;
+history.scrollRestoration = 'manual';
+function updateViewport() {
+  const viewport = window.visualViewport;
+  // Leave pinch zoom alone; only follow the visible screen at the normal scale.
+  if (viewport && Math.abs(viewport.scale - 1) > 0.05) return;
+  const height = viewport?.height || window.innerHeight;
+  document.documentElement.style.setProperty('--app-height', `${height}px`);
+  document.documentElement.style.setProperty('--app-top', `${viewport?.offsetTop || 0}px`);
+  document.body.classList.toggle('keyboard-open', document.activeElement?.matches('input, textarea') && window.innerHeight - height > 120);
+}
+function keepInputVisible() {
+  updateViewport();
+  const input = document.activeElement;
+  if (input?.matches('input, textarea') && (!window.visualViewport || Math.abs(visualViewport.scale - 1) < 0.05)) {
+    requestAnimationFrame(() => { if (document.activeElement === input) input.scrollIntoView({ block: 'nearest' }); });
+  }
+}
+window.visualViewport?.addEventListener('resize', keepInputVisible);
+window.visualViewport?.addEventListener('scroll', updateViewport);
+window.addEventListener('resize', updateViewport);
+document.addEventListener('focusin', keepInputVisible);
+document.addEventListener('focusout', () => requestAnimationFrame(updateViewport));
+updateViewport();
+$('#install-help').onclick = () => $('#install-dialog').showModal();
+$('#close-install').onclick = () => $('#install-dialog').close();
+if (navigator.standalone) $('#install-help').hidden = true;
 const toast = message => { $('#toast').textContent = message; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('visible'), 4500); };
 
 function syncAudioButtons() {
@@ -167,27 +196,41 @@ function renderResults() {
 }
 function render() {
   if (!ready) return;
+  const scrollTop = main.scrollTop;
+  const openNote = main.querySelector('details[open]') && main.querySelector('[data-action="reveal"]')?.dataset.id;
   document.querySelectorAll('[data-page]').forEach(el => { el.classList.toggle('active', el.dataset.page === page); if (el.dataset.page === page) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current'); });
   page === 'review' ? renderReview() : renderWords();
+  if (openNote && main.querySelector('[data-action="reveal"]')?.dataset.id === openNote) main.querySelector('details')?.setAttribute('open', '');
+  main.scrollTop = scrollTop;
   syncAudioButtons();
 }
 async function refresh() {
+  const run = ++refreshRun;
   const result = await Promise.all([db.allWords(), db.getRound()]);
+  if (run !== refreshRun) return false;
+  const changed = JSON.stringify([words, round]) !== JSON.stringify(result);
   if (round?.id !== result[1]?.id || round?.answers.length !== result[1]?.answers.length) revealed = false;
   [words, round] = result;
   for (const entry of audioCache.values()) {
     if (typeof entry.key === 'string' && !words.some(word => word.hasAudio && `${word.id}:${word.updatedAt}` === entry.key)) discardAudio(entry);
   }
+  return changed;
 }
 async function navigate() {
   if (!ready) return;
   if (editor.open && !closeEditor()) { history.replaceState(null, '', `#${page}`); return; }
+  pageViews.set(page, { query, filter, scrollTop: main.scrollTop, openNote: Boolean(main.querySelector('details[open]')) });
+  const run = ++navigationRun;
   stopAudio();
+  document.activeElement?.blur();
   page = ['words', 'review', 'mistakes'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'words';
-  query = '';
-  try { await refresh(); } catch (error) { toast(error.message); }
-  if (page === 'review') { reviewMode = !chooseScope && round && round.answers.length < round.ids.length ? 'active' : 'setup'; revealed = false; chooseScope = false; }
-  render(); window.scrollTo(0, 0);
+  const view = pageViews.get(page);
+  query = view?.query || ''; filter = view?.filter || 'all';
+  if (page === 'review' && chooseScope) { reviewMode = 'setup'; chooseScope = false; }
+  render();
+  if (view?.openNote) main.querySelector('details')?.setAttribute('open', '');
+  main.scrollTop = view?.scrollTop || 0;
+  try { if (await refresh() && run === navigationRun) render(); } catch (error) { if (run === navigationRun) toast(error.message); }
 }
 window.addEventListener('hashchange', navigate);
 $('#main').addEventListener('input', event => { if (event.target.id === 'search') { query = event.target.value; renderList(); } });
@@ -214,12 +257,12 @@ $('#main').addEventListener('click', async event => {
     else if (action === 'start' || action === 'retry') {
       if (round && round.answers.length < round.ids.length && !confirm('开始新一轮复习？已完成题目的学习记录会保留。')) return;
       round = await db.startRound(action === 'retry' ? 'retry' : scope, action === 'retry' ? 'all' : count, round?.id || null);
-      await refresh(); reviewMode = 'active'; revealed = false; render(); window.scrollTo(0, 0);
+      await refresh(); reviewMode = 'active'; revealed = false; render(); main.scrollTop = 0;
     } else if (action === 'practice-mistakes') { scope = 'mistakes'; chooseScope = true; location.hash = 'review'; }
     else if (action === 'correct' || action === 'wrong') {
       stopAudio();
       round = await db.answerRound(round.id, round.ids[round.answers.length], action === 'correct');
-      revealed = false; render();
+      revealed = false; render(); main.scrollTop = 0;
       // The answer is already committed; a failed refresh must not grade it again.
       try { await refresh(); render(); } catch { toast('本题已保存，词库暂时未刷新'); }
     }
@@ -239,7 +282,7 @@ function openEditor(word) {
   $('#record-button').textContent = word?.hasAudio ? '重新录音' : '开始录音';
   $('#preview-button').disabled = !word?.hasAudio;
   $('#save-word').disabled = false; $('#record-button').disabled = false;
-  editor.showModal();
+  editor.showModal(); $('.editor-body').scrollTop = 0;
 }
 function closeEditor() {
   if (saving) return false;
@@ -257,7 +300,9 @@ $('#word-form').addEventListener('input', () => { dirty = true; });
 window.addEventListener('beforeunload', event => { if (dirty || recording || requestingMic || saving) { event.preventDefault(); event.returnValue = ''; } });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && recording && recorder?.state === 'recording') { recorder.stop(); toast('录音已暂停，请试听后保存'); }
-  if (!document.hidden && ready && !editor.open && !actionBusy) refresh().then(render).catch(error => toast(error.message));
+  if (!document.hidden && ready && !editor.open && !actionBusy && !document.activeElement?.matches('input, textarea')) {
+    refresh().then(changed => { if (changed && !editor.open && !document.activeElement?.matches('input, textarea')) render(); }).catch(error => toast(error.message));
+  }
 });
 $('#record-button').onclick = async () => {
   if (recording) { if (recorder?.state === 'recording') recorder.stop(); return; }
@@ -355,7 +400,7 @@ $('#login-form').onsubmit = async event => {
 };
 $('#logout').onclick = async () => {
   if (!confirm('退出登录？已保存的词条和复习记录会保留。')) return;
-  try { await db.request('/logout', 'POST', {}); clearAudioCache(); ready = false; words = []; round = null; $('#main').innerHTML = ''; $('#logout').hidden = true; $('#refresh').hidden = true; loginDialog.showModal(); }
+  try { await db.request('/logout', 'POST', {}); clearAudioCache(); pageViews.clear(); query = ''; filter = 'all'; ready = false; words = []; round = null; $('#main').innerHTML = ''; $('#logout').hidden = true; $('#refresh').hidden = true; loginDialog.showModal(); }
   catch (error) { toast(error.message); }
 };
 $('#refresh').onclick = async () => { if (!ready || actionBusy) return; try { await refresh(); render(); toast('已更新到最新记录'); } catch (error) { toast(error.message); } };

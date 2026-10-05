@@ -4,23 +4,31 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f7f6f0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="乡音">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="description" content="把乡音记下来。自己的汕尾话有声词库，录音、收藏与易错词复习。">
   <title>乡音 · 汕尾话词库</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/styles.css">
   <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <header class="topbar"><a class="brand" href="#words" aria-label="乡音，返回词库"><img src="/favicon.svg" width="36" height="36" alt=""><span>乡音<span class="brand-note">汕尾话学习手记</span></span></a><div class="header-actions"><button id="refresh" class="icon-button" aria-label="刷新词库" hidden>↻</button><button id="logout" class="text-button" hidden>退出登录</button></div></header>
+  <div id="app-shell">
+  <header class="topbar"><a class="brand" href="#words" aria-label="乡音，返回词库"><img src="/favicon.svg" width="36" height="36" alt=""><span>乡音<span class="brand-note">汕尾话学习手记</span></span></a><div class="header-actions"><button id="install-help" class="text-button" aria-label="添加到主屏幕">桌面</button><button id="refresh" class="icon-button" aria-label="刷新词库" hidden>↻</button><button id="logout" class="text-button" hidden>退出登录</button></div></header>
   <main id="main" tabindex="-1"><p class="loading">正在打开你的词库…</p></main>
   <nav class="bottom-nav" aria-label="主要导航">
     <a href="#words" data-page="words"><span data-icon="book"></span>我的词库</a>
     <a href="#review" data-page="review"><span data-icon="cards"></span>温习一下</a>
     <a href="#mistakes" data-page="mistakes"><span data-icon="sprout"></span>易错词</a>
   </nav>
+  </div>
   <dialog id="editor" aria-labelledby="editor-title">
     <form id="word-form">
       <div class="dialog-heading"><div><span class="eyebrow">留住一声乡音</span><h2 id="editor-title">添加字词</h2></div><button type="button" class="icon-button" id="close-editor" aria-label="关闭编辑">×</button></div>
+      <div class="editor-body">
       <label for="word-text">字 / 词 <span class="required">必填</span></label>
       <input id="word-text" name="text" required maxlength="50" placeholder="例如：叔叔、吃饭" autocomplete="off">
       <label for="word-note">释义或备注 <span class="optional">选填</span></label>
@@ -28,9 +36,20 @@
       <div class="record-box"><div id="record-status" role="status">给这个词留一段读音</div><p id="record-hint">可以现在录音，也可以保存后再补录</p><div class="record-actions"><button type="button" class="button primary" id="record-button">开始录音</button><button type="button" class="button secondary" id="preview-button" disabled>试听读音</button></div></div>
       <label class="favorite-check"><input id="word-favorite" type="checkbox"> 收藏这个词</label>
       <p id="word-stats" class="muted"></p>
+      </div>
+      <div class="editor-bottom">
       <p id="editor-error" class="error" role="alert"></p>
       <div class="dialog-footer"><button type="button" id="delete-word" class="button danger-text" hidden>删除词条</button><button type="submit" id="save-word" class="button primary">保存词条</button></div>
+      </div>
     </form>
+  </dialog>
+  <dialog id="install-dialog" aria-labelledby="install-title">
+    <div class="dialog-heading"><h2 id="install-title">把乡音放到主屏幕</h2><button id="close-install" class="icon-button" aria-label="关闭添加指南" autofocus>×</button></div>
+    <img class="install-icon" src="/apple-touch-icon.png" width="72" height="72" alt="乡音应用图标">
+    <p>像打开 App 一样，随时听一听乡音。</p>
+    <h3>iPhone / iPad</h3><ol><li>用 Safari 打开当前网站，点击“分享”。</li><li>选择“添加到主屏幕”；如果有“作为网页 App 打开”，保持开启。</li><li>以后从主屏幕的“乡音”图标进入。</li></ol>
+    <h3>Android</h3><p>在浏览器菜单中选择“添加到主屏幕”或“安装应用”（名称因浏览器而异）。</p>
+    <p class="muted">主屏幕模式没有 Safari 地址栏，仍需联网使用。若提示登录，使用原账号即可，已保存的词库不会丢失。</p>
   </dialog>
   <dialog id="login-dialog" aria-labelledby="login-title">
     <form id="login-form"><img src="/favicon.svg" class="login-logo" width="56" height="56" alt="">

@@ -75,6 +75,8 @@ function json(res, value, status = 200, extra = {}) {
 }
 const files = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
+  ['/manifest.webmanifest', ['manifest.webmanifest', 'application/manifest+json; charset=utf-8']],
+  ...['apple-touch-icon.png', 'icon-192.png', 'icon-512.png'].map(name => [`/${name}`, [name, 'image/png']]),
   ...['index.html', 'styles.css', 'app.js', 'db.js', 'domain.js', 'favicon.svg'].map(name => [
     `/${name}`, [name, name.endsWith('.js') ? 'text/javascript; charset=utf-8' : name.endsWith('.css') ? 'text/css; charset=utf-8' : name.endsWith('.svg') ? 'image/svg+xml' : 'text/html; charset=utf-8'],
   ]),
