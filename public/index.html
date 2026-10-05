@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f6f0">
+  <meta name="description" content="把乡音记下来。自己的汕尾话有声词库，录音、收藏与易错词复习。">
+  <title>乡音 · 汕尾话词库</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="#words" aria-label="乡音，返回词库"><img src="/favicon.svg" width="36" height="36" alt=""><span>乡音<span class="brand-note">汕尾话学习手记</span></span></a><div class="header-actions"><button id="refresh" class="icon-button" aria-label="刷新词库" hidden>↻</button><button id="logout" class="text-button" hidden>退出登录</button></div></header>
+  <main id="main" tabindex="-1"><p class="loading">正在打开你的词库…</p></main>
+  <nav class="bottom-nav" aria-label="主要导航">
+    <a href="#words" data-page="words"><span data-icon="book"></span>我的词库</a>
+    <a href="#review" data-page="review"><span data-icon="cards"></span>温习一下</a>
+    <a href="#mistakes" data-page="mistakes"><span data-icon="sprout"></span>易错词</a>
+  </nav>
+  <dialog id="editor" aria-labelledby="editor-title">
+    <form id="word-form">
+      <div class="dialog-heading"><div><span class="eyebrow">留住一声乡音</span><h2 id="editor-title">添加字词</h2></div><button type="button" class="icon-button" id="close-editor" aria-label="关闭编辑">×</button></div>
+      <label for="word-text">字 / 词 <span class="required">必填</span></label>
+      <input id="word-text" name="text" required maxlength="50" placeholder="例如：叔叔、吃饭" autocomplete="off">
+      <label for="word-note">释义或备注 <span class="optional">选填</span></label>
+      <textarea id="word-note" name="note" rows="3" maxlength="1000" placeholder="记下含义、使用场景，或一个小提示…"></textarea>
+      <div class="record-box"><div id="record-status" role="status">给这个词留一段读音</div><p id="record-hint">可以现在录音，也可以保存后再补录</p><div class="record-actions"><button type="button" class="button primary" id="record-button">开始录音</button><button type="button" class="button secondary" id="preview-button" disabled>试听读音</button></div></div>
+      <label class="favorite-check"><input id="word-favorite" type="checkbox"> 收藏这个词</label>
+      <p id="word-stats" class="muted"></p>
+      <p id="editor-error" class="error" role="alert"></p>
+      <div class="dialog-footer"><button type="button" id="delete-word" class="button danger-text" hidden>删除词条</button><button type="submit" id="save-word" class="button primary">保存词条</button></div>
+    </form>
+  </dialog>
+  <dialog id="login-dialog" aria-labelledby="login-title">
+    <form id="login-form"><img src="/favicon.svg" class="login-logo" width="56" height="56" alt="">
+      <span class="eyebrow">乡音 · 汕尾话学习手记</span><h2 id="login-title">熟悉的声音，<br>慢慢学会。</h2><p class="muted">登录你的个人词库，接着上次的进度。</p>
+      <label for="username">账号</label><input id="username" autocomplete="username" required maxlength="100">
+      <label for="password">密码</label><input id="password" type="password" autocomplete="current-password" required maxlength="1024">
+      <p id="login-error" class="error" role="alert"></p><button class="button primary full" type="submit">进入我的词库 <span aria-hidden="true">→</span></button>
+      <p class="login-footnote">词条、录音与学习记录，安全存放在你的服务器。</p>
+    </form>
+  </dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

@@ -1,0 +1,99 @@
+# 乡音 · 汕尾话词库
+
+以手机为主的个人有声词库：手动添加字词、网页录音、收藏、复习计分和易错词专项练习。词条、录音和学习进度保存在服务器的 SQLite 文件中，同一个账号在不同设备登录即可共用。没有第三方服务、前端构建步骤或运行时 npm 依赖。
+
+## Windows / Ubuntu 本机快速运行
+
+安装 **Node.js 24 LTS**，进入项目目录，将 `.env.example` 复制为 `.env`：
+
+```powershell
+# Windows PowerShell
+Copy-Item .env.example .env
+```
+
+```sh
+# Ubuntu
+cp .env.example .env
+```
+
+编辑 `.env`，设置 `APP_USERNAME` 和 `APP_PASSWORD`，账号和密码非空即可，例如 `APP_PASSWORD=123`。然后两种系统都运行：
+
+```sh
+npm start
+```
+
+无需 `npm install`。在这台电脑打开 http://localhost:3025，使用配置的账号登录。按 Ctrl+C 停止服务。首次启动自动创建数据库；Node 24 的内置 SQLite 可能显示实验性提示，不影响启动。
+
+**手机录音必须通过 HTTPS 访问。** 电脑本机的 `localhost` 可以录音，但手机访问 `http://电脑局域网IP:3025` 不具备安全上下文，不能直接录音。不要通过公开的 HTTP 网址登录。
+
+## Docker 部署，配合现有 Nginx
+
+Windows 安装 Docker Desktop（Linux containers）；Ubuntu 安装 Docker Engine 与 Compose 插件。项目只启动应用，由你现有的 Nginx 配置域名、HTTPS 和证书。
+
+1. 复制 `.env.example` 为 `.env`，修改账号、密码，并取消 `PUBLIC_URL` 的注释，填写实际访问网址，例如 `PUBLIC_URL=https://words.your-domain.com`，不带末尾斜杠。此项用于请求来源校验及安全 Cookie；本机 HTTP 体验可以留空。
+2. 执行：
+
+```sh
+docker compose up -d --build
+```
+
+3. 应用默认映射到宿主机 `127.0.0.1:3025`，只供同一宿主机的 Nginx 访问。在现有 HTTPS `server` 配置中加入以下内容（已有 `location /` 时替换该段）：
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:3025;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    client_max_body_size 12m;
+}
+```
+
+4. 执行 `nginx -t` 检查配置，通过后执行 `nginx -s reload`。手机打开 `https://你的域名` 并登录，浏览器询问时允许麦克风权限。
+
+如果 3025 端口已占用，修改 `.env` 的 `PORT`，并将 `proxy_pass` 改为对应端口。应用部署在域名根路径，不使用 `/words/` 等路径前缀。若 Nginx 也在容器内，请将两个服务接入同一 Docker 网络，通过 `app:3025` 转发；容器中的 `127.0.0.1` 指向 Nginx 自己。
+
+```sh
+docker compose logs -f          # 查看运行日志
+docker compose down             # 停止服务，保留数据卷
+docker compose up -d --build     # 更新代码后重新部署
+```
+
+词条和录音保存在 `app_data` 命名卷，容器重建不会清空。**不要执行 `docker compose down -v`，它会删除数据卷。** 修改 `.env` 的账号或密码后重新创建容器，旧登录状态自动失效，词库不变。不要把 `.env` 提交到版本库。
+
+不使用 Docker 时，运行 `npm start`，同样使用上面的 Nginx 配置。设置 `HOST=127.0.0.1`，让 Node 仅供本机代理访问，并把 `.env` 的 `PUBLIC_URL` 设置为实际 HTTPS 网址。代理需保留 `Origin`、`Cookie`、`Set-Cookie` 和 `X-App-Request`，不要启用接口缓存。
+
+如果没有域名、只在局域网使用，需要给设备安装并信任局域网 HTTPS 证书；可通过 `CERT_FILE` / `KEY_FILE` 让 Node 直接提供 HTTPS，同时设置相匹配的 `PUBLIC_URL`。自签名证书仅点击“继续访问”不保证能获得麦克风权限。
+
+## 使用规则
+
+- 一个部署对应一个个人账号；首版没有公开注册、多人独立词库或找回密码页面。账号密码由部署者在 `.env` 设置。
+- 字词最多 50 字，备注最多 1000 字；每词一段录音，最长 3 分钟、最大 8 MB。可先保存文字，以后补录；不支持上传音频文件。
+- 复习可选全部、收藏或易错词，题量为 10、20 或全部；不含没有录音的词。每轮随机且不重复。
+- 先听录音，再手动选择答对 / 答错。答对 1 分、答错 0 分；每题保存后才前进。暂停、刷新或换设备后可继续尚未完成的一轮。
+- 答错即进入易错词；连续答对 3 次自动移出。手动标记已掌握也可移出，保留累计记录；再次答错会重新进入。
+- 一轮结束后查看得分、正确率和错词，可再练本轮错词。开始新一轮保留累计记录，替换上一轮的题目列表。
+- 切换页面、返回浏览器前台或点击右上角刷新，会获取服务器最新数据；不是实时推送。服务器校验编辑版本，避免另一设备的内容被静默覆盖。
+- 保存失败时保留编辑内容和录音，重新连接后重试；未保存前请保持页面打开。手机系统强制关闭网页无法保证保留未保存的录音。
+- 切到后台时自动结束录音并保留待保存内容。不同浏览器会选择支持的录音格式；正式使用前建议用自己的手机录一小段并试听。
+
+本项目没有分类、备份/恢复入口、文件上传或自动发音评分。录音以原始音频数据存入 SQLite，列表请求不加载音频；只有播放时下载。普通模式的数据目录为 `./data`，需要迁移部署时请先停止服务再整体迁移此目录。
+
+## 验证与开发
+
+```sh
+npm test
+```
+
+使用 Node 自带测试运行器验证复习规则、登录权限、录音保存、重复计分、多设备读写和重启持久化。测试使用临时数据目录与随机端口，结束后自动关闭服务。
+
+浏览器端回归测试依赖仅在开发时安装：
+
+```sh
+npm ci
+npx playwright install chromium
+npm run test:browser
+```
+
+浏览器测试使用模拟麦克风，不会录制真实声音；覆盖移动端布局及添加、录音、播放、收藏、复习、易错词、失败保留等流程。截图输出到 `test-results/`。浏览器测试不等同于 iPhone / Android 实机验证。
+
+技术参考：[浏览器录音的安全上下文要求](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia)、[Node 内置 SQLite](https://nodejs.org/api/sqlite.html)。
