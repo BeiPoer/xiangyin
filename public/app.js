@@ -19,27 +19,99 @@ document.querySelectorAll('[data-icon]').forEach(el => el.innerHTML = icon(el.da
 const escape = text => String(text ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 let words = [], round = null, page = 'words', filter = 'all', query = '', scope = 'all', count = '10', reviewMode = 'setup', revealed = false;
 let ready = false, actionBusy = false, editWord = null, pendingAudio = null, dirty = false, saving = false, recording = false, requestingMic = false, recorder = null, stream = null, timer = null, editGeneration = 0, chooseScope = false;
-let audio = null, audioURL = null, toastTimer;
+let audio = null, playbackRun = 0, playbackTimer, toastTimer;
+// ponytail: retain at most 8 native players in this tab; increase only if repeat-listening needs it.
+const audioCache = new Map();
 const editor = $('#editor');
 const toast = message => { $('#toast').textContent = message; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('visible'), 4500); };
 
+function syncAudioButtons() {
+  document.querySelectorAll('[data-action="play"], [data-action="reveal"], #preview-button').forEach(button => {
+    const isPreview = button.id === 'preview-button';
+    const active = audio && (isPreview ? editor.open && audio.key === (pendingAudio || `${editWord?.id}:${editWord?.updatedAt}`) : !editor.open && audio.id === button.dataset.id);
+    const state = active ? audio.state : 'idle';
+    if (!button.dataset.idleHtml) {
+      button.dataset.idleHtml = button.innerHTML;
+      button.dataset.idleLabel = button.getAttribute('aria-label') || button.textContent;
+    }
+    button.dataset.audioState = state;
+    button.setAttribute('aria-busy', String(state === 'loading'));
+    button.setAttribute('aria-pressed', String(state !== 'idle'));
+    if (state === 'idle') {
+      button.innerHTML = button.dataset.idleHtml;
+      button.setAttribute('aria-label', button.dataset.idleLabel);
+      button.removeAttribute('title');
+    } else {
+      const label = state === 'loading' ? '加载中' : '播放中';
+      button.innerHTML = `${state === 'loading' ? '<span class="audio-spinner" aria-hidden="true"></span>' : '<span class="audio-bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>'}<span class="audio-caption">${label}</span>`;
+      button.setAttribute('aria-label', `${label}：${words.find(word => word.id === audio.id)?.text || '试听读音'}，点击停止`);
+      button.title = `${label}，点击停止`;
+    }
+  });
+}
+function discardAudio(entry) {
+  if (audio === entry) stopAudio();
+  audioCache.delete(entry.key);
+  entry.player.pause(); entry.player.removeAttribute('src'); entry.player.load();
+  if (entry.url) URL.revokeObjectURL(entry.url);
+}
 function stopAudio() {
-  if (audio) { audio.pause(); audio.removeAttribute('src'); audio.load(); }
-  audio = null;
-  if (audioURL) URL.revokeObjectURL(audioURL);
-  audioURL = null;
+  const previous = audio;
+  audio = null; playbackRun++; clearTimeout(playbackTimer);
+  if (previous) {
+    previous.player.pause();
+    // Abort unfinished downloads on cancellation; fully buffered players remain reusable.
+    if (previous.state === 'loading') discardAudio(previous);
+  }
+  syncAudioButtons();
+}
+function clearAudioCache() {
+  stopAudio();
+  for (const entry of audioCache.values()) discardAudio(entry);
 }
 async function play(id, blob) {
+  const key = blob || `${id}:${words.find(word => word.id === id)?.updatedAt}`;
+  const wasActive = audio?.key === key;
   stopAudio();
-  if (blob) audioURL = URL.createObjectURL(blob);
-  const player = new Audio(blob ? audioURL : `/api/words/${id}/audio`);
-  audio = player;
-  try { await player.play(); return true; }
-  catch {
-    const message = '播放失败，请检查网络或刷新登录状态后重试。';
-    if (editor.open) $('#editor-error').textContent = message; else toast(message);
-    return false;
+  if (wasActive) return;
+  let entry = audioCache.get(key);
+  if (!entry) {
+    const url = blob ? URL.createObjectURL(blob) : null;
+    entry = { key, id, url, player: new Audio(url || `/api/words/${id}/audio`), state: 'idle' };
   }
+  audioCache.delete(key); audioCache.set(key, entry);
+  while (audioCache.size > 8) discardAudio(audioCache.values().next().value);
+  audio = entry;
+  const run = playbackRun, player = entry.player;
+  const current = () => audio === entry && playbackRun === run;
+  const failed = () => {
+    if (!current()) return;
+    stopAudio(); discardAudio(entry);
+    const message = '播放失败或加载超时，请检查网络后点击重试。';
+    if (editor.open) $('#editor-error').textContent = message; else toast(message);
+  };
+  const loading = () => {
+    if (!current()) return;
+    entry.state = 'loading'; syncAudioButtons(); clearTimeout(playbackTimer);
+    playbackTimer = setTimeout(failed, 15000);
+  };
+  player.onwaiting = loading;
+  player.onplaying = () => {
+    if (!current()) return;
+    clearTimeout(playbackTimer); entry.state = 'playing';
+    if (page === 'review' && reviewMode === 'active' && round?.ids[round.answers.length] === id && !revealed) {
+      revealed = true; renderReview();
+    }
+    syncAudioButtons();
+  };
+  player.onended = player.onpause = () => { if (current() && player.paused) { entry.state = 'idle'; stopAudio(); } };
+  player.onerror = failed;
+  loading();
+  try {
+    player.currentTime = 0;
+    // Call directly during the tap so iOS keeps the user gesture permission.
+    await player.play();
+  } catch { failed(); }
 }
 
 function card(word, mistake = false) {
@@ -58,6 +130,7 @@ function renderList() {
   pool.sort((a, b) => mistakes ? b.wrong - a.wrong || b.updatedAt - a.updatedAt : b.createdAt - a.createdAt);
   $('#list-count').textContent = `${pool.length} 个词`;
   $('#word-list').innerHTML = pool.length ? pool.map(word => card(word, mistakes)).join('') : query ? empty('暂时没找到这个词', '换个关键词试试，也可以搜索备注。') : mistakes ? empty('慢慢练，总会记住', '复习中答错的词会自动出现在这里。', false, 'sprout') : filter === 'favorites' ? empty('把想多练的词，留在这里', '点击词条旁的星星，就能加入收藏。', false, 'star') : empty('从一声熟悉的乡音开始', '记一个词，录一段声音。你的汕尾话词库，就从这里开始。', true);
+  syncAudioButtons();
 }
 function renderWords() {
   const mistakes = page === 'mistakes';
@@ -78,6 +151,7 @@ function renderReview() {
     $('#main').innerHTML = `<section class="review-top"><button class="text-button" data-action="pause">← 暂停复习</button><span>第 ${round.answers.length + 1} / ${round.ids.length} 个词</span></section><progress value="${round.answers.length}" max="${round.ids.length}" aria-label="复习进度"></progress>
       <section class="study-card"><span class="eyebrow">先试着读，再听听看</span><h1 class="study-word">${escape(word.text)}</h1><div class="sound-wave" aria-hidden="true">▂ ▅ ▃ ▇ ▄ ▆ ▂</div><button class="button primary listen" data-action="reveal" data-id="${word.id}">${icon('sound')}${revealed ? '再听一遍' : '听读音，对照一下'}</button>${revealed ? `<details><summary>查看释义或备注</summary><p>${escape(word.note || '这个词还没有备注。')}</p></details>` : '<p class="muted">想一想，你记得它的读音吗？</p>'}</section>
       <p class="judge-hint">${revealed ? '刚才读对了吗？诚实地记录就好。' : '听过录音后，就可以判断对错。'}</p><div class="answer-buttons"><button class="button wrong" data-action="wrong" ${revealed ? '' : 'disabled'}>${icon('cross')}答错了</button><button class="button correct" data-action="correct" ${revealed ? '' : 'disabled'}>${icon('check')}答对了</button></div><p class="page-footnote">每完成一题自动保存，随时可以接着练。</p>`;
+    syncAudioButtons();
     return;
   }
   const available = eligible(words, scope).length;
@@ -95,11 +169,15 @@ function render() {
   if (!ready) return;
   document.querySelectorAll('[data-page]').forEach(el => { el.classList.toggle('active', el.dataset.page === page); if (el.dataset.page === page) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current'); });
   page === 'review' ? renderReview() : renderWords();
+  syncAudioButtons();
 }
 async function refresh() {
   const result = await Promise.all([db.allWords(), db.getRound()]);
   if (round?.id !== result[1]?.id || round?.answers.length !== result[1]?.answers.length) revealed = false;
   [words, round] = result;
+  for (const entry of audioCache.values()) {
+    if (typeof entry.key === 'string' && !words.some(word => word.hasAudio && `${word.id}:${word.updatedAt}` === entry.key)) discardAudio(entry);
+  }
 }
 async function navigate() {
   if (!ready) return;
@@ -117,12 +195,12 @@ $('#main').addEventListener('click', async event => {
   const button = event.target.closest('[data-action]');
   if (!button || button.disabled || actionBusy) return;
   const { action, id } = button.dataset;
+  if (action === 'play' || action === 'reveal') { void play(id); return; }
   const word = words.find(item => item.id === id);
   actionBusy = true;
   button.disabled = true;
   try {
     if (action === 'add' || action === 'edit') openEditor(word);
-    else if (action === 'play') await play(id);
     else if (action === 'favorite' || action === 'master') {
       if (action === 'master' && !confirm(`将“${word.text}”标记为已掌握？历史答题记录会保留。`)) return;
       const saved = await db.patchWord(id, action === 'favorite' ? { favorite: !word.favorite } : { mastered: true });
@@ -138,7 +216,6 @@ $('#main').addEventListener('click', async event => {
       round = await db.startRound(action === 'retry' ? 'retry' : scope, action === 'retry' ? 'all' : count, round?.id || null);
       await refresh(); reviewMode = 'active'; revealed = false; render(); window.scrollTo(0, 0);
     } else if (action === 'practice-mistakes') { scope = 'mistakes'; chooseScope = true; location.hash = 'review'; }
-    else if (action === 'reveal') { if (await play(id)) { revealed = true; renderReview(); } }
     else if (action === 'correct' || action === 'wrong') {
       stopAudio();
       round = await db.answerRound(round.id, round.ids[round.answers.length], action === 'correct');
@@ -168,6 +245,7 @@ function closeEditor() {
   if (saving) return false;
   if ((dirty || recording || requestingMic) && !confirm('还有未保存的内容，确定放弃并离开吗？')) return false;
   editGeneration++; stopAudio(); clearInterval(timer);
+  for (const entry of audioCache.values()) if (entry.url) discardAudio(entry);
   if (recorder && recorder.state !== 'inactive') recorder.stop();
   stream?.getTracks().forEach(track => track.stop());
   recording = false; requestingMic = false; stream = null; pendingAudio = null; dirty = false;
@@ -265,7 +343,7 @@ $('#delete-word').onclick = async () => {
 };
 
 const loginDialog = $('#login-dialog');
-window.addEventListener('login-required', () => { if (!loginDialog.open) loginDialog.showModal(); });
+window.addEventListener('login-required', () => { clearAudioCache(); if (!loginDialog.open) loginDialog.showModal(); });
 loginDialog.addEventListener('cancel', event => event.preventDefault());
 $('#login-form').onsubmit = async event => {
   event.preventDefault(); const button = $('#login-form button'); button.disabled = true; $('#login-error').textContent = '';
@@ -277,7 +355,7 @@ $('#login-form').onsubmit = async event => {
 };
 $('#logout').onclick = async () => {
   if (!confirm('退出登录？已保存的词条和复习记录会保留。')) return;
-  try { await db.request('/logout', 'POST', {}); stopAudio(); ready = false; words = []; round = null; $('#main').innerHTML = ''; $('#logout').hidden = true; $('#refresh').hidden = true; loginDialog.showModal(); }
+  try { await db.request('/logout', 'POST', {}); clearAudioCache(); ready = false; words = []; round = null; $('#main').innerHTML = ''; $('#logout').hidden = true; $('#refresh').hidden = true; loginDialog.showModal(); }
   catch (error) { toast(error.message); }
 };
 $('#refresh').onclick = async () => { if (!ready || actionBusy) return; try { await refresh(); render(); toast('已更新到最新记录'); } catch (error) { toast(error.message); } };
