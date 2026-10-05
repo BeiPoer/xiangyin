@@ -9,7 +9,7 @@ export async function startServer(directory) {
   const dataDir = directory || await mkdtemp(join(tmpdir(), 'shanwei-test-'));
   const child = spawn(process.execPath, ['server.mjs'], {
     cwd: new URL('../', import.meta.url), windowsHide: true,
-    env: { ...process.env, APP_USERNAME: credentials.username, APP_PASSWORD: credentials.password, PORT: '0', HOST: '127.0.0.1', DATA_DIR: dataDir, PUBLIC_URL: '', CERT_FILE: '', KEY_FILE: '' },
+    env: { ...process.env, APP_USERNAME: credentials.username, APP_PASSWORD: credentials.password, PORT: '0', HOST: '127.0.0.1', DATA_DIR: dataDir, CERT_FILE: '', KEY_FILE: '' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let logs = '';

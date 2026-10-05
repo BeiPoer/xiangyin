@@ -9,7 +9,7 @@ test('简单密码登录、权限保护、音频、同步、冲突、复习幂�
   try {
     let api = await client(server);
     assert.equal((await api('/words')).status, 401);
-    assert.equal((await api('/login', 'POST', credentials, { Origin: 'https://elsewhere.example' })).status, 403);
+    assert.equal((await api('/login', 'POST', credentials, { Origin: 'https://elsewhere.example', 'Sec-Fetch-Site': 'cross-site' })).status, 403);
     assert.equal((await api('/login', 'POST', { ...credentials, password: 'wrong' })).status, 401);
     const login = await api('/login', 'POST', credentials);
     assert.equal(login.status, 200); assert.match(login.headers.get('set-cookie'), /HttpOnly/);
@@ -62,4 +62,39 @@ test('简单密码登录、权限保护、音频、同步、冲突、复习幂�
     assert.equal((await api(`/words/${word.id}/audio`)).status, 404);
     await api('/logout', 'POST', {}); assert.equal((await api('/words')).status, 401);
   } finally { await server.stop(false); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); }
+});
+
+test('HTTPS 反向代理无需域名配置，保留跨站防护及安全 Cookie', async () => {
+  const server = await startServer();
+  try {
+    const api = await client(server);
+    const browser = { Origin: 'https://words.example.com:8443', 'Sec-Fetch-Site': 'same-origin' };
+    const login = await api('/login', 'POST', credentials, browser);
+    assert.equal(login.status, 200);
+    assert.match(login.headers.get('set-cookie'), /; Secure/);
+    assert.match(login.headers.get('set-cookie'), /SameSite=Strict/);
+    assert.equal(login.headers.get('access-control-allow-origin'), null);
+    const word = { text: '叔叔', note: '', favorite: false };
+    assert.equal((await api('/words', 'POST', word, browser)).status, 200);
+    for (const site of ['cross-site', 'same-site', 'none']) {
+      assert.equal((await api('/words', 'POST', word, { ...browser, 'Sec-Fetch-Site': site })).status, 403);
+    }
+    assert.equal((await api('/words', 'POST', word, { ...browser, 'X-App-Request': '' })).status, 403);
+    assert.equal((await api('/words', 'POST', word, { ...browser, 'Content-Type': 'text/plain' })).status, 415);
+    const preflight = await fetch(`${server.url}/api/login`, { method: 'OPTIONS', headers: {
+      Origin: 'https://elsewhere.example', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type,x-app-request',
+    } });
+    assert.equal(preflight.status, 403);
+    assert.equal(preflight.headers.get('access-control-allow-origin'), null);
+    const logout = await api('/logout', 'POST', {}, browser);
+    assert.equal(logout.status, 200);
+    assert.match(logout.headers.get('set-cookie'), /Max-Age=0; Secure/);
+    // Older browsers without Fetch Metadata remain protected by the custom-header preflight.
+    assert.equal((await api('/login', 'POST', credentials, { Origin: 'https://words.example.com' })).status, 200);
+    const forwarded = await api('/login', 'POST', credentials, { Origin: '', 'X-Forwarded-Proto': 'https' });
+    assert.match(forwarded.headers.get('set-cookie'), /; Secure/);
+    const direct = await api('/login', 'POST', credentials);
+    assert.equal(direct.status, 200);
+    assert.doesNotMatch(direct.headers.get('set-cookie'), /; Secure/);
+  } finally { await server.stop(); }
 });

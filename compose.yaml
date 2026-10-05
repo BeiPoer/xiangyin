@@ -5,7 +5,6 @@ services:
     environment:
       APP_USERNAME: ${APP_USERNAME:?请在 .env 中设置账号}
       APP_PASSWORD: ${APP_PASSWORD:?请在 .env 中设置密码}
-      PUBLIC_URL: ${PUBLIC_URL:-}
     ports:
       - "127.0.0.1:${PORT:-3025}:3025"
     volumes:

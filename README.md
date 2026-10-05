@@ -30,7 +30,7 @@ npm start
 
 Windows 安装 Docker Desktop（Linux containers）；Ubuntu 安装 Docker Engine 与 Compose 插件。项目只启动应用，由你现有的 Nginx 配置域名、HTTPS 和证书。
 
-1. 复制 `.env.example` 为 `.env`，修改账号、密码，并取消 `PUBLIC_URL` 的注释，填写实际访问网址，例如 `PUBLIC_URL=https://words.your-domain.com`，不带末尾斜杠。此项用于请求来源校验及安全 Cookie；本机 HTTP 体验可以留空。
+1. 复制 `.env.example` 为 `.env`，填写账号、密码即可。域名和 HTTPS 由 Nginx 管理，应用无需配置网站地址。
 2. 执行：
 
 ```sh
@@ -60,9 +60,9 @@ docker compose up -d --build     # 更新代码后重新部署
 
 词条和录音保存在 `app_data` 命名卷，容器重建不会清空。**不要执行 `docker compose down -v`，它会删除数据卷。** 修改 `.env` 的账号或密码后重新创建容器，旧登录状态自动失效，词库不变。不要把 `.env` 提交到版本库。
 
-不使用 Docker 时，运行 `npm start`，同样使用上面的 Nginx 配置。设置 `HOST=127.0.0.1`，让 Node 仅供本机代理访问，并把 `.env` 的 `PUBLIC_URL` 设置为实际 HTTPS 网址。代理需保留 `Origin`、`Cookie`、`Set-Cookie` 和 `X-App-Request`，不要启用接口缓存。
+不使用 Docker 时，运行 `npm start`，同样使用上面的 Nginx 配置。设置 `HOST=127.0.0.1`，让 Node 仅供本机代理访问。代理需保留 `Origin`、`Sec-Fetch-Site`、`Cookie`、`Set-Cookie` 和 `X-App-Request`，不要启用接口缓存或添加跨域 CORS 放行配置。应用使用浏览器请求标记和自定义请求头防止跨站操作，HTTPS 登录自动设置安全 Cookie，无需配置域名。
 
-如果没有域名、只在局域网使用，需要给设备安装并信任局域网 HTTPS 证书；可通过 `CERT_FILE` / `KEY_FILE` 让 Node 直接提供 HTTPS，同时设置相匹配的 `PUBLIC_URL`。自签名证书仅点击“继续访问”不保证能获得麦克风权限。
+如果没有域名、只在局域网使用，需要给设备安装并信任局域网 HTTPS 证书；可通过 `CERT_FILE` / `KEY_FILE` 让 Node 直接提供 HTTPS。自签名证书仅点击“继续访问”不保证能获得麦克风权限。
 
 ## 使用规则
 

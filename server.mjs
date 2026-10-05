@@ -7,11 +7,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { grade, makeRound } from './public/domain.js';
 
-const { APP_USERNAME, APP_PASSWORD, PUBLIC_URL, DATA_DIR = './data', CERT_FILE, KEY_FILE, PORT = '3025', HOST = '0.0.0.0' } = process.env;
+const { APP_USERNAME, APP_PASSWORD, DATA_DIR = './data', CERT_FILE, KEY_FILE, PORT = '3025', HOST = '0.0.0.0' } = process.env;
 if (!APP_USERNAME || !APP_PASSWORD) {
   throw new Error('请在 .env 中设置 APP_USERNAME 和 APP_PASSWORD，账号和密码不能为空');
 }
-if (PUBLIC_URL && !/^https?:\/\/[^/]+$/.test(PUBLIC_URL)) throw new Error('PUBLIC_URL 请填写完整网址，不带末尾斜杠');
 if (Boolean(CERT_FILE) !== Boolean(KEY_FILE)) throw new Error('CERT_FILE 和 KEY_FILE 必须同时设置');
 await mkdir(DATA_DIR, { recursive: true });
 const db = new DatabaseSync(join(DATA_DIR, 'shanwei.sqlite'));
@@ -27,8 +26,11 @@ if (db.prepare("SELECT value FROM state WHERE key='credentials'").get()?.value !
 }
 const salt = randomBytes(32);
 const passwordHash = await promisify(scrypt)(APP_PASSWORD, salt, 64);
-const secure = Boolean(CERT_FILE) || PUBLIC_URL?.startsWith('https://');
-const cookie = (token, maxAge) => `session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
+const cookie = (req, token, maxAge) => {
+  // These headers only enable the stricter cookie flag; they never authorize requests.
+  const secure = req.socket.encrypted || req.headers['x-forwarded-proto'] === 'https' || req.headers.origin?.startsWith('https://');
+  return `session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
+};
 const sessionKey = req => hash((req.headers.cookie || '').match(/(?:^|;\s*)session=([a-f0-9]{64})(?:;|$)/)?.[1] || '');
 const getWord = id => {
   const row = db.prepare('SELECT data FROM words WHERE id=?').get(id);
@@ -83,8 +85,9 @@ let globalAttempts = { until: 0, count: 0 };
 async function api(req, res, path) {
   const method = req.method;
   if (!['GET', 'HEAD'].includes(method)) {
-    const origin = PUBLIC_URL || `${req.socket.encrypted ? 'https' : 'http'}://${req.headers.host}`;
-    check(req.headers.origin === origin && req.headers['x-app-request'] === '1', '请从本站页面操作', 403);
+    // Custom headers require CORS preflight in browsers. Never allow cross-origin CORS here.
+    const site = req.headers['sec-fetch-site'];
+    check(req.headers['x-app-request'] === '1' && (!site || site === 'same-origin'), '请从本站页面操作', 403);
   }
   if (path === '/api/login' && method === 'POST') {
     const now = Date.now();
@@ -102,13 +105,13 @@ async function api(req, res, path) {
     db.prepare('DELETE FROM sessions WHERE expires < ?').run(now);
     const token = randomBytes(32).toString('hex');
     db.prepare('INSERT INTO sessions VALUES (?, ?)').run(hash(token), now + 30 * 86400_000);
-    json(res, { username: APP_USERNAME }, 200, { 'Set-Cookie': cookie(token, 30 * 86400) }); return;
+    json(res, { username: APP_USERNAME }, 200, { 'Set-Cookie': cookie(req, token, 30 * 86400) }); return;
   }
   check(db.prepare('SELECT token FROM sessions WHERE token=? AND expires>?').get(sessionKey(req), Date.now()), '登录已过期，请重新登录；未保存的内容仍保留在当前页面', 401);
   if (path === '/api/session' && method === 'GET') { json(res, { username: APP_USERNAME }); return; }
   if (path === '/api/logout' && method === 'POST') {
     db.prepare('DELETE FROM sessions WHERE token=?').run(sessionKey(req));
-    json(res, {}, 200, { 'Set-Cookie': cookie('', 0) }); return;
+    json(res, {}, 200, { 'Set-Cookie': cookie(req, '', 0) }); return;
   }
   if (path === '/api/words' && method === 'GET') { json(res, listWords()); return; }
   if (path === '/api/words' && method === 'POST') {
